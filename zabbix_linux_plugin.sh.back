@@ -1,9 +1,4 @@
 #!/bin/bash
-# =====================================
-#     Author: sandow
-#     Email: j.k.yulei@gmail.com
-#     HomePage: www.gsandow.com
-# =====================================
 ports_dis(){
 	app=$1
 	pids=$(ps -ef |grep memcache|grep -v grep |awk '{printf "%s|" ,$2}'|sed 's/|$//g')
@@ -51,51 +46,90 @@ tcp_status_fun(){
 	fi
 	#netstat -n | awk '/^tcp/ {++state[$NF]} END {for(key in state) print key,state[key]}' > /tmp/netstat.tmp
 }
+auto_discovery_and_get_value(){
+	M_COMMAND="echo -e 'stats\nquit' | nc 127.0.0.1 $PORT"
+	R_COMMAND=""
+	APP=$1
+	ARG=$2
+	PORT=$3
+	if [ $APP == 'memcached' ];then
+		COMMAND=$M_COMMAND
+	elif [ $APP == 'redis' ];then
+		COMMAND=$R_COMMAND
+	elif [ $APP == 'redis_cluster' ];then
+		COMMAND=$R_cluster_COMMAND
+	fi
+
+if [ $ARG == 'discovery' ];then
+	if [ $M_PORT == 'num' ];then
+		export discovery_data=${mem_discovery_data}$(echo -e "stats\nquit" | nc 127.0.0.1 $port|sed '/END/d' \
+				|awk -v v1=$port  '{if ($3 + 0 == $3) {print $2 ,"num", v1 }}')
+	elif [ $M_PORT == 'string' ];then
+		export discovery_data=${discovery_data}$(echo -e "stats\nquit" | nc 127.0.0.1 $port|sed '/END/d' \
+		|awk -v v1=$port  '{if ($3 + 0 != $3) {print $2 ,"tring", v1 }}')
+	fi
+fi
+}
 memcached_status_fun(){
-	ARG=$1  # key or discovery
-	PORT=$2
-	TYPE=$3
+	M_COMMAND=$1  # key or discovery
+	M_PORT=$2
 	#ports=$(ports_dis memcached)
 	ports=11211
-	if  [ $ARG == "discovery" ];then
+	if  [ $M_COMMAND == "discovery" ];then
 		for port in ${ports[@]};do
-			export mem_discovery=$mem_discovery$(echo -e "stats\nquit" | nc 127.0.0.1 $port|sed '/END/d' \
-			|awk -v v1=$port '{if($3 + 0 == $3) {print $2 ,"num", v1 } else {print $2, "string", v1}}')
+			if [ $M_PORT == 'num' ];then
+				export mem_discovery=$mem_discovery$(echo -e "stats\nquit" | nc 127.0.0.1 $port|sed '/END/d' \
+				|awk -v v1=$port  '{if ($3 + 0 == $3) {print $2 ,"num", v1 }}')
+			else
+				export mem_discovery=$mem_discovery$(echo -e "stats\nquit" | nc 127.0.0.1 $port|sed '/END/d' \
+				|awk -v v1=$port  '{if ($3 + 0 != $3) {print $2 ,"tring", v1 }}')
+			fi
 
 		done
 		to_json "MEM_KEY" "$mem_discovery"
 	else
 		#echo -e "stats\nquit" | nc 127.0.0.1 "$M_PORT" | grep "STAT $M_COMMAND " | awk '{print $3}'
-		mem_status=$(echo -e "stats\nquit" | nc 127.0.0.1 $PORT|sed 's/STAT //g;/^END/d')
-		echo "${mem_status[@]}"|awk -v v1=$ARG '{if ($1==v1)print $2}' 
+		mem_status=$(echo -e "stats\nquit" | nc 127.0.0.1 $M_PORT|sed 's/STAT //g;/^END/d')
+		echo "${mem_status[@]}"|awk -v v1=$M_COMMAND '{if ($1==v1)print $2}' 
 	fi
 }
 
 redis_cluster_status_fun(){
 	ARG=$1
-	PORT=$2
+	R_PORT=$2
 	TYPE=$3
+	if  [ $M_COMMAND == "discovery" ];then
+		if [ $TYPE == 'num' ];then
+			echo 1
+		elif [ $TYPE == 'string' ];then
+			echo 2
+		fi
+
+	fi
 	[ "$@" == 1 ] && to_json "$redis_status" "redis_key"
 	echo -ne "cluster info\r\n"|nc 127.0.0.1 $R_PORT|awk -F ':' -v v1=$R_COMMAND '{if($1==v1) print $NF}'
 }
 redis_status_fun(){
 	ARG=$1
-	PORT=$2
+	R_PORT=$2
 	TYPE=$3
-	PORTS=6379
+	echo $TYPE 
 	opt="s/(db[0-9]+):.*([0-9]+),.*=([0-9]+),.*=([0-9]+)/\1_keys:\2\n\1_expires:\3\n\1_avg_ttl:\4/g"
 	if  [ $ARG == "discovery" ];then
-		for port in  ${PORTS[@]};do
-			export redis_discovery=${redis_discovery}$(echo -ne "info\r\n"|nc 127.0.0.1 $port|sed -re $opt -e '/^#/d' -e '/^\r/d' -e '/^\$/d' \
-			|awk -v v1=$port -F: '{if($2 + 0 == $2) {print $1 ,"num", v1 } else {print $1, "string", v1}}')
-		done
-		to_json "REDIS_KEY" "$redis_discovery"
-	else
-		echo -ne "info\r\n"|nc 127.0.0.1 $PORT| sed -re $opt -e '/^#/d' -e '/^\r/d' -e '/^\$/d' \
-			|awk -F ':' -v v1=$ARG '{if($1==v1) print $NF}'
+		if [ $TYPE == 'num' ];then
+			redis_status=$(echo -ne "info\r\n"|nc 127.0.0.1 $R_PORT|sed -re $opt -e '/^#/d' -e '/^\r/d' -e '/^\$/d' \
+			|awk -v v1=$R_PORT  '{if ($3 + 0 == $3) {print $2 ,"num", v1 }}')
+			to_json "REDIS_KEY" "$redis_status"
+		elif [ $TYPE == 'string' ];then
+			redis_status=$(echo -ne "info\r\n"|nc 127.0.0.1 $R_PORT|sed -re $opt -e '/^#/d' -e '/^\r/d' -e '/^\$/d' \
+			|awk -v v1=$R_PORT  '{if ($3 + 0 != $3) {print $2 ,"string", v1 }}')
+			to_json "REDIS_KEY" "$redis_status"
+		fi
+
 	fi
 	#redis_status=$(echo -ne "info\r\n"|nc 127.0.0.1 $R_PORT|sed -re $opt -e '/^#/d' -e '/^\r/d' -e '/^\$/d')
 	#[ $# -eq 1 ] && to_json "redis_key" "$redis_status"
+	echo -ne "info\r\n"|nc 127.0.0.1 $R_PORT|awk -F ':' -v v1=$R_COMMAND '{if($1==v1) print $NF}'
 }
 
 nginx_status_fun(){
@@ -139,20 +173,20 @@ phpfpm_status_fun() {
 }
 main(){
 	case $1 in
-		tcp_status)
+		tcp)
 			tcp_status_fun $2;
 			;;
 		nginx)
 			nginx_status_fun $2 $3;
 			;;
 		memcached)
-			memcached_status_fun $2 $3 $4;
+			memcached_status_fun $2 $3;
 			;;
 		redis)
 			redis_status_fun "$2" "$3" "$4" ;
 			;;
 		redis_cluster)
-			redis_cluster_status_fun $2 $3 $4;
+			redis_cluster_status_fun $2 $3;
 			;;
 		phpfpm)
 			phpfpm_status_fun $2 $3;

@@ -1,0 +1,27 @@
+#!/bin/bash
+##################################
+# Zabbix monitoring script
+#
+# nginx:
+#  - anything available via nginx stub-status module
+#
+##################################
+# Contact:
+#  vincent.viallet@gmail.com
+##################################
+# ChangeLog:
+#  20100922     VV      initial creation
+##################################
+
+# Zabbix requested parameter
+ZBX_REQ_DATA="$1"
+
+#
+# Extract data from nginx stats
+#
+case $ZBX_REQ_DATA in
+  type)  echo "{{ zabbix_pdmi_application }}";;
+  *)     echo $ERROR_WRONG_PARAM; exit 1;;
+esac
+
+exit 0
